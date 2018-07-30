@@ -1,0 +1,143 @@
+---
+title: "TaxaAssign_Bin"
+author: "SShekarriz"
+date: "3/12/2018"
+output: html_document
+---
+
+#MAG_TaxaAssigner()
+This is a function to assign proper taxon to each metagenome assembled bin using a unique k-mer count (the HyperLogLog) algorithm from KrakenHLL. please read KrakenHLL for more https://github.com/fbreitwieser/krakenhll
+
+KrakenHLL outputs kmer frequencies per contig in a bin but user needs to visually compare all the contigs within a bin
+and decode the most appropiate taxnomic level depends on k-mer frequence. BinTaxaAssigner investigate the quality of a hit at species-level, if a species-level hit fails to meet a certain quality threshold it goes to next taxonomic level up to phylum-level.
+How to use the function: MAG_TaxaAssigner(krakenHll_output)
+
+```{r cars}
+library(dplyr)
+MAG_TaxaAssigner <- function(BinX) {
+
+  bacteria <- BinX %>% filter(taxName == "Bacteria") %>% select("kmers")
+  bacteria_percent <- BinX %>% filter(taxName == "Bacteria") %>% select("X.")
+  # all kmers per taxonomic level
+  phylum_all <- BinX %>% filter(rank == "phylum") 
+  order_all <- BinX %>% filter(rank == "order")
+  family_all <- BinX %>% filter(rank == "family")
+  genus_all <- BinX %>% filter(rank == "genus")
+  species_all <- BinX %>% filter(rank == "species")
+  # Top kmers per taxonomic level
+  phylum_top <- phylum_all %>% top_n(kmers, n=1)
+  order_top <- order_all %>% top_n(kmers, n=1)
+  family_top <- family_all %>% top_n(kmers, n=1)
+  genus_top <- genus_all %>% top_n(kmers, n=1)
+  species_top <- species_all %>% top_n(kmers, n=1)
+  # Top3 kmers per taxonomic level
+  species_sum <- species_all %>% top_n(kmers, n=3) %>% select(kmers) %>% sum()
+  genus_sum <- genus_all %>% top_n(kmers, n=3) %>% select(kmers) %>% sum()
+  family_sum <- family_all %>% top_n(kmers, n=3) %>% select(kmers) %>% sum()
+  order_sum <- order_all %>% top_n(kmers, n=3) %>% select(kmers) %>% sum()
+  phylum_sum <- phylum_all %>% top_n(kmers, n=3) %>% select(kmers) %>% sum()
+  
+  if(bacteria_percent >= 40){
+    if(species_top$kmers >= 0.7 * bacteria){
+      print("A highly accurate species:")
+      top_hit <- species_top
+      print(species_top)
+    } else if (species_top$kmers >= 0.4 * bacteria &
+               species_top$kmers >= 0.5 * species_sum) {
+      print("Among these identified species")
+      print(species_all)
+      print("The correct species:")
+      top_hit <- species_top
+      print(species_top)
+    } else {
+      print("A proper species was not found")
+      if (genus_top$kmers >= 0.7 * bacteria) {
+        print("A highly accurate genus:")
+        top_hit <- genus_top
+        print(genus_top)
+      } else if (genus_top$kmers >= 0.4 * bacteria &
+                 genus_top$kmers >= 0.5 * genus_sum) {
+        print("Among these identified genera")
+        print(genus_all)
+        print("The correct genus:")
+        top_hit <- genus_top
+        print(genus_top)
+      } else {
+        print("Sorry! I couldn't find a proper genus")
+        if (family_top$kmers >= 0.7 * bacteria) {
+          print("A highly accurate family:")
+          top_hit <- family_top
+          print(family_top)
+        } else if (family_top$kmers >= 0.4 * bacteria &
+                   family_top$kmers >= 0.5 * family_sum) {
+          print("Among these identified families:")
+          print(family_all)
+          print("the correct family found")
+          top_hit <- family_top
+          print(family_top)
+        } else {
+          print("Opps! even a proper family was not found")
+          if (order_top$kmers >= 0.7 * bacteria) {
+            print("A highly accurate order:")
+            top_hit <- order_top
+            print(order_top)
+          } else if (order_top$kmers >= 0.4 * bacteria &
+                     order_top$kmers >= 0.5 * order_sum) {
+            print("Among these identified orders:")
+            print(order_all)
+            print("the correct order found")
+            top_hit <- order_top
+            print(order_top)
+          } else {
+            print("This is sad :( can't even find a proper order")
+            if (phylum_top$kmers >= 0.7 * bacteria) {
+              print("A highly accurate phylum")
+              top_hit <- phylum_top
+              print(phylum_top)
+            } else if (phylum_top$kmers >= 0.4 * bacteria &
+                       phylum_top$kmers >= 0.5 * phylum_sum) {
+              print("Among these identified phylums")
+              print(phylum_all)
+              print("the correct phylum found")
+              top_hit <- phylum_top
+              print(phylum_top)
+            } else {
+              print("Oh NO :( you have enough bacteria contigs but really I can't assign any taxa!")
+              print("You should probably go back and actually investigate this bin!")
+            }
+          }
+        }
+      }
+    }
+    
+  } else {
+    print("this bin contains very few bacteria contigs!")
+  }
+
+  
+}
+```
+
+#forloop
+This is a forloop to assign taxa to all the bins/MAGs in a directory! The input dir and output file has to be defined!
+
+```{r pressure, echo=FALSE}
+PATH="/home/common/shekas3/DonorB_metagenomics/metaspades_coAssembly_DMG_CEMG_2013_deconseq_bin_MAG_taxa/"
+outPATH="/home/common/shekas3/DonorB_metagenomics/metaspades_coAssembly_DMG_CEMG_2013_deconseq_bin_MAG_taxa/Trimmed_Bin_info.txt"
+
+files <- list.files(path=PATH, pattern="*trimmed_krakenHLL", full.names = TRUE, recursive=FALSE)
+lapply(files, function(x) {
+  t <- read.csv(x, sep = "\t", stringsAsFactors = FALSE) # load file
+  t$taxName <- trimws(t$taxName)
+  # apply function
+  out <- data.frame(x, MAG_TaxaAssigner(t))
+  #print(x)
+  #MAG_TaxaAssigner(t)
+  
+    # write to file
+    write.table(out, file = outPATH, sep="\t", quote=F, row.names=F, col.names=F, append = TRUE)
+    
+  
+})
+```
+
